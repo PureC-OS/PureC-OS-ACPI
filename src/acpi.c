@@ -142,10 +142,6 @@ void acpi_gas_write(const struct acpi_gas *g, uint32_t value) {
         *(volatile uint32_t *)ptr = value;
 }
 
-static uint16_t fadt_u16(const uint8_t *f, uint32_t off) {
-    return (uint16_t)((uint16_t)f[off] | ((uint16_t)f[off + 1] << 8));
-}
-
 static uint32_t fadt_u32(const uint8_t *f, uint32_t off) {
     return (uint32_t)f[off] | ((uint32_t)f[off + 1] << 8) |
            ((uint32_t)f[off + 2] << 16) | ((uint32_t)f[off + 3] << 24);
