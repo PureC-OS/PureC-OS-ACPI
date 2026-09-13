@@ -1,0 +1,93 @@
+name: Build and Test PureC-OS-ACPI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  tags:
+    - 'v*'
+
+jobs:
+  test:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Run test suite
+        run: make test
+
+  build:
+    name: Cross-check and kernel module
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils-x86-64-linux-gnu zip
+
+      - name: Syntax-check with freestanding kernel flags
+        # Host gcc understands -ffreestanding/-mcmodel=kernel; the real
+        # cross build happens in the PureC OS kernel tree.
+        run: make check CROSS=
+
+      - name: Build relocatable kernel module
+        run: make module CROSS=
+
+      - name: Guard the kernel-module ABI
+        # The loader (src/kernel/module/kmod.c) resolves undefined module
+        # symbols against ksym.c. Anything outside this allowlist fails
+        # the build here instead of failing at boot on bare metal.
+        run: |
+          test -f build/modules/acpi.elf
+          test -f build/modules/acpi.ko
+          ALLOW='^(klog|klogf|memcmp|memcpy|memset|strlen|strcmp|strncmp|strncpy)$'
+          UNDEF=$(x86_64-linux-gnu-nm -u build/modules/acpi.elf | awk '{print $2}')
+          echo "undefined module symbols:"; echo "$UNDEF"
+          BAD=$(echo "$UNDEF" | grep -vE "$ALLOW" || true)
+          if [ -n "$BAD" ]; then
+            echo "ERROR: symbols missing from kernel ksymtab:"; echo "$BAD"
+            exit 1
+          fi
+          x86_64-linux-gnu-nm build/modules/acpi.elf | grep -q ' kmod_info$'
+
+      - name: Package distribution artifacts
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION="${{ github.ref_name }}"
+          mkdir -p dist/include dist/modules
+          cp -r include/acpi dist/include/
+          cp build/modules/acpi.elf dist/modules/
+          cp build/modules/acpi.ko dist/modules/
+          cp README.md dist/ 2>/dev/null || true
+          tar -czvf "purec-os-acpi-${VERSION}.tar.gz" -C dist .
+          (cd dist && zip -r "../purec-os-acpi-${VERSION}.zip" .)
+          sha256sum "purec-os-acpi-${VERSION}.tar.gz" \
+            "purec-os-acpi-${VERSION}.zip" \
+            dist/modules/acpi.elf > SHA256SUMS.txt
+
+      - name: Upload artifacts
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: purec-os-acpi-${{ github.ref_name }}
+          path: |
+            purec-os-acpi-*.tar.gz
+            purec-os-acpi-*.zip
+            SHA256SUMS.txt

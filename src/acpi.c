@@ -12,7 +12,6 @@ uint64_t g_acpi_hhdm = 0;
 struct acpi_fadt_cache g_acpi_fadt;
 
 static bool g_ready = false;
-static bool g_battery_present = false;
 
 struct rsdp_v1 {
     char     signature[8];
@@ -303,18 +302,7 @@ static void acpi_enable(void) {
 }
 
 static void battery_probe(void) {
-    g_battery_present = false;
-    struct sdt_header *dsdt = (struct sdt_header *)acpi_find_table("DSDT");
-    if (!dsdt)
-        return;
-    const uint8_t *data = (const uint8_t *)dsdt;
-    for (uint32_t i = 0; i + 4 <= dsdt->length; i++) {
-        if (memcmp(data + i, "BAT0", 4) == 0) {
-            g_battery_present = true;
-            klogf(KLOG_DEBUG, "acpi: BAT0 device found in DSDT at offset %u", i);
-            return;
-        }
-    }
+    acpi_battery_refresh();
 }
 
 int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
@@ -377,7 +365,8 @@ bool acpi_is_ready(void) {
 }
 
 bool acpi_has_battery(void) {
-    return g_battery_present;
+    struct acpi_battery b;
+    return acpi_battery_get(&b);
 }
 
 void acpi_dump_tables(void) {
@@ -449,5 +438,11 @@ void acpi_dump_tables(void) {
         klogf(KLOG_INFO, "acpi: _S5 SLP_TYPa=%u SLP_TYPb=%u", a, b);
     else
         klog(KLOG_WARN, "acpi: _S5 not parsed, shutdown will try SLP_TYP 7 then 5");
-    klogf(KLOG_INFO, "acpi: battery device: %s", g_battery_present ? "present (BAT0)" : "not found");
+    {
+        struct acpi_battery bat;
+        if (acpi_battery_get(&bat) && bat.present)
+            klogf(KLOG_INFO, "acpi: battery device: present (%s uid %u)", bat.name, bat.uid);
+        else
+            klog(KLOG_INFO, "acpi: battery device: not found");
+    }
 }

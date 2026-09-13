@@ -54,3 +54,7 @@ void acpi_pm_write(uint32_t port, uint16_t value);
 
 // Parse DSDT _S5 package into SLP_TYPa/b. Called once from acpi_init.
 void acpi_s5_parse(void);
+
+// Discover the battery device in DSDT (_HID PNP0C0A) and cache it.
+// Called once from acpi_init.
+void acpi_battery_refresh(void);
