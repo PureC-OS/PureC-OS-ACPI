@@ -278,7 +278,7 @@ void acpi_battery_refresh(void) {
     for (void *ssdt = acpi_next_table("SSDT", NULL); ssdt;
          ssdt = acpi_next_table("SSDT", ssdt))
         scan_table_by_ptr(ssdt);
-    if (!cached_bat.present) {
+    if (!cached_bat.present && !seen_bat_device) {
         // Legacy signal: bare "BAT0" reference (method bodies, _BIF users).
         const uint8_t *data = (const uint8_t *)dsdt;
         const uint8_t *end = table_bounded_end(data);
@@ -314,7 +314,7 @@ void acpi_battery_refresh(void) {
             }
         }
     }
-    if (!cached_ac.present) {
+    if (!cached_ac.present && !seen_ac_device) {
         // Fallback: bare ACAD/ADP1 NameSeg reference without _HID.
         const uint8_t *data = (const uint8_t *)dsdt;
         const uint8_t *end = table_bounded_end(data);
