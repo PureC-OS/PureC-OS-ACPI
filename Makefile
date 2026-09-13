@@ -32,7 +32,7 @@ BIN_DIR ?= $(ACPI_DIR)/build
 MODULE_DIR := $(BIN_DIR)/modules
 BUILD := $(ACPI_DIR)/build/obj
 
-SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c
+SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c src/kmod_info.c
 MOD_OBJS := $(SOURCES:src/%.c=$(BUILD)/%.k.o)
 MOD_ELF := $(MODULE_DIR)/acpi.elf
 MOD_KO := $(MODULE_DIR)/acpi.ko
