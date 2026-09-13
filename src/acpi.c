@@ -12,6 +12,7 @@ uint64_t g_acpi_hhdm = 0;
 struct acpi_fadt_cache g_acpi_fadt;
 
 static bool g_ready = false;
+static bool g_battery_present = false;
 
 struct rsdp_v1 {
     char     signature[8];
@@ -141,6 +142,10 @@ void acpi_gas_write(const struct acpi_gas *g, uint32_t value) {
         *(volatile uint32_t *)ptr = value;
 }
 
+static uint16_t fadt_u16(const uint8_t *f, uint32_t off) {
+    return (uint16_t)((uint16_t)f[off] | ((uint16_t)f[off + 1] << 8));
+}
+
 static uint32_t fadt_u32(const uint8_t *f, uint32_t off) {
     return (uint32_t)f[off] | ((uint32_t)f[off + 1] << 8) |
            ((uint32_t)f[off + 2] << 16) | ((uint32_t)f[off + 3] << 24);
@@ -224,54 +229,6 @@ void *acpi_find_table(const char *signature) {
     return NULL;
 }
 
-void *acpi_next_table(const char *signature, void *prev) {
-    if (!signature)
-        return NULL;
-    struct sdt_header *xsdt = NULL, *rsdt = NULL;
-    acpi_root_tables(&xsdt, &rsdt);
-    struct sdt_header *roots[2] = {xsdt, rsdt};
-    bool skip_until_prev = (prev != NULL);
-    for (int t = 0; t < 2; t++) {
-        struct sdt_header *root = roots[t];
-        if (!root)
-            continue;
-        bool wide = (root == xsdt);
-        uint32_t stride = wide ? 8u : 4u;
-        if (root->length < sizeof(struct sdt_header))
-            continue;
-        uint32_t entries = (root->length - sizeof(struct sdt_header)) / stride;
-        const uint8_t *base = (const uint8_t *)root + sizeof(struct sdt_header);
-        for (uint32_t i = 0; i < entries; i++) {
-            uint64_t addr;
-            if (wide) {
-                addr = (uint64_t)base[i * 8] | ((uint64_t)base[i * 8 + 1] << 8) |
-                       ((uint64_t)base[i * 8 + 2] << 16) | ((uint64_t)base[i * 8 + 3] << 24) |
-                       ((uint64_t)base[i * 8 + 4] << 32) | ((uint64_t)base[i * 8 + 5] << 40) |
-                       ((uint64_t)base[i * 8 + 6] << 48) | ((uint64_t)base[i * 8 + 7] << 56);
-            } else {
-                addr = (uint64_t)base[i * 4] | ((uint64_t)base[i * 4 + 1] << 8) |
-                       ((uint64_t)base[i * 4 + 2] << 16) | ((uint64_t)base[i * 4 + 3] << 24);
-            }
-            if (!addr)
-                continue;
-            struct sdt_header *tbl = (struct sdt_header *)acpi_map_phys(addr);
-            if (tbl->length < sizeof(struct sdt_header))
-                continue;
-            if (!acpi_table_valid(tbl, tbl->length))
-                continue;
-            if (memcmp(tbl->signature, signature, 4) != 0)
-                continue;
-            if (skip_until_prev) {
-                if (tbl == (struct sdt_header *)prev)
-                    skip_until_prev = false;
-                continue;
-            }
-            return tbl;
-        }
-    }
-    return NULL;
-}
-
 static void fadt_parse(struct sdt_header *fadt) {
     memset(&g_acpi_fadt, 0, sizeof(g_acpi_fadt));
     g_acpi_fadt.reset_reg_off = -1;
@@ -350,7 +307,18 @@ static void acpi_enable(void) {
 }
 
 static void battery_probe(void) {
-    acpi_battery_refresh();
+    g_battery_present = false;
+    struct sdt_header *dsdt = (struct sdt_header *)acpi_find_table("DSDT");
+    if (!dsdt)
+        return;
+    const uint8_t *data = (const uint8_t *)dsdt;
+    for (uint32_t i = 0; i + 4 <= dsdt->length; i++) {
+        if (memcmp(data + i, "BAT0", 4) == 0) {
+            g_battery_present = true;
+            klogf(KLOG_DEBUG, "acpi: BAT0 device found in DSDT at offset %u", i);
+            return;
+        }
+    }
 }
 
 int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
@@ -413,8 +381,7 @@ bool acpi_is_ready(void) {
 }
 
 bool acpi_has_battery(void) {
-    struct acpi_battery b;
-    return acpi_battery_get(&b);
+    return g_battery_present;
 }
 
 void acpi_dump_tables(void) {
@@ -486,18 +453,5 @@ void acpi_dump_tables(void) {
         klogf(KLOG_INFO, "acpi: _S5 SLP_TYPa=%u SLP_TYPb=%u", a, b);
     else
         klog(KLOG_WARN, "acpi: _S5 not parsed, shutdown will try SLP_TYP 7 then 5");
-    {
-        struct acpi_battery bat;
-        if (acpi_battery_get(&bat) && bat.present)
-            klogf(KLOG_INFO, "acpi: battery device: present (%s uid %u)", bat.name, bat.uid);
-        else
-            klog(KLOG_INFO, "acpi: battery device: not found");
-        struct acpi_ac_adapter ac;
-        if (acpi_ac_get(&ac) && ac.present)
-            klogf(KLOG_INFO, "acpi: AC adapter device: present (%s)", ac.name);
-        else
-            klog(KLOG_INFO, "acpi: AC adapter device: not found");
-        if (acpi_ec_present())
-            klog(KLOG_INFO, "acpi: embedded controller present (EC probe allowed)");
-    }
+    klogf(KLOG_INFO, "acpi: battery device: %s", g_battery_present ? "present (BAT0)" : "not found");
 }
