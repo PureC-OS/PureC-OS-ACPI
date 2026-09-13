@@ -10,7 +10,8 @@
 static const uint8_t *fake_dsdt;
 static uint32_t fake_len;
 
-void *acpi_find_table(const char *signature) {    if (fake_dsdt && signature && memcmp(signature, "DSDT", 4) == 0) {
+void *acpi_find_table(const char *signature) {
+    if (fake_dsdt && signature && memcmp(signature, "DSDT", 4) == 0) {
         static uint8_t img[1024];
         uint32_t total = fake_len + 8;
         if (total > sizeof(img))

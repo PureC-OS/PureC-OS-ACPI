@@ -220,8 +220,15 @@ static void scan_image(const uint8_t *data, const uint8_t *end) {
         } else if (kind == DEV_AC && !cached_ac.present) {
             cached_ac.present = true;
             memcpy(cached_ac.name, name, sizeof(cached_ac.name) - 1);
-            cached_ac.online_valid = false; // live _PSR needs AML executor
-            klogf(KLOG_OK, "acpi: AC adapter device %.4s _HID ACPI0003", name);
+            int psr = device_psr_static(bstart, bend);
+            if (psr >= 0) {
+                cached_ac.online_valid = true;
+                cached_ac.online = psr != 0;
+                klogf(KLOG_OK, "acpi: AC adapter %.4s static _PSR=%d", name, psr);
+            } else {
+                cached_ac.online_valid = false;
+                klogf(KLOG_OK, "acpi: AC adapter device %.4s _HID ACPI0003", name);
+            }
         } else if (kind == DEV_EC && !cached_ec) {
             cached_ec = true;
             klogf(KLOG_INFO, "acpi: embedded controller %.4s present", name);
