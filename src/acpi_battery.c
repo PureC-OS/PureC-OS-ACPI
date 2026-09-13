@@ -243,7 +243,7 @@ static void scan_table_by_ptr(void *tbl) {
         char signature[4];
         uint32_t length;
     } __attribute__((packed)) *hdr = tbl;
-    if (hdr->length < 36)
+    if (hdr->length < 9 || hdr->length > 16 * 1024 * 1024)
         return;
     const uint8_t *data = (const uint8_t *)tbl;
     const uint8_t *end = data + hdr->length;
