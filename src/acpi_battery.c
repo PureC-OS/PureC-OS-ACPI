@@ -23,6 +23,8 @@ static struct acpi_battery cached_bat;
 static struct acpi_ac_adapter cached_ac;
 static bool cached_ec;
 static bool cached_valid = false;
+static bool seen_bat_device;
+static bool seen_ac_device;
 static const uint8_t *table_bounded_end(const uint8_t *data);
 
 // Decode an AML PkgLength at p (bounded by end). Returns field size,
@@ -206,6 +208,10 @@ static void scan_image(const uint8_t *data, const uint8_t *end) {
         enum dev_kind kind = DEV_NONE;
         if (!device_classify(bstart, bend, &kind, name, &uid))
             continue;
+        if (kind == DEV_BATTERY)
+            seen_bat_device = true;
+        else if (kind == DEV_AC)
+            seen_ac_device = true;
         int sta = device_sta_static(bstart, bend);
         if (sta == 0) {
             klogf(KLOG_DEBUG, "acpi: device %.4s ignored (_STA Zero)", name);
@@ -258,6 +264,8 @@ void acpi_battery_refresh(void) {
     memset(&cached_bat, 0, sizeof(cached_bat));
     memset(&cached_ac, 0, sizeof(cached_ac));
     cached_ec = false;
+    seen_bat_device = false;
+    seen_ac_device = false;
     cached_valid = false;
     void *dsdt = acpi_find_table("DSDT");
     if (!dsdt) {
