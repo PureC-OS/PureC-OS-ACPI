@@ -187,6 +187,8 @@ static int device_psr_static(const uint8_t *bstart, const uint8_t *bend) {
     }
     return -1;
 }
+
+static void scan_image(const uint8_t *data, const uint8_t *end) {
     for (const uint8_t *p = data; p + 2 <= end; p++) {
         if (p[0] != AML_EXTOP || p[1] != AML_DEVICEOP)
             continue;
