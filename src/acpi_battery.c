@@ -158,8 +158,35 @@ static int device_sta_static(const uint8_t *bstart, const uint8_t *bend) {
     return -1; // no _STA: per spec the device is present
 }
 
-// Scan one AML table image [data,end) for Device() objects.
-static void scan_image(const uint8_t *data, const uint8_t *end) {
+static int device_psr_static(const uint8_t *bstart, const uint8_t *bend) {
+    for (const uint8_t *q = bstart + 4; q + 4 <= bend; q++) {
+        if (memcmp(q, "_PSR", 4) != 0)
+            continue;
+        const uint8_t *win_end = q + 4 + 32;
+        if (win_end > bend)
+            win_end = bend;
+        for (const uint8_t *r = q + 4; r < win_end; r++) {
+            if (*r != AML_RETURNOP)
+                continue;
+            if (r + 1 >= win_end)
+                break;
+            uint8_t c = r[1];
+            if (c == AML_ZEROOP)
+                return 0;
+            if (c == AML_ONEOP)
+                return 1;
+            if (c == AML_BYTE_PREFIX && r + 2 < win_end)
+                return r[2] != 0 ? 1 : 0;
+            if (c == AML_WORD_PREFIX && r + 3 < win_end)
+                return (r[2] | r[3]) != 0 ? 1 : 0;
+            if (c == AML_DWORD_PREFIX && r + 5 < win_end)
+                return load_le32(r + 2) != 0 ? 1 : 0;
+            break; // dynamic _PSR: no static answer
+        }
+        return -1;
+    }
+    return -1;
+}
     for (const uint8_t *p = data; p + 2 <= end; p++) {
         if (p[0] != AML_EXTOP || p[1] != AML_DEVICEOP)
             continue;
