@@ -145,6 +145,61 @@ int main(void) {
         memset(&bat, 0, sizeof(bat));
         CHECK(!get_fresh(&bat));
     }
+    // AC adapter with static _PSR Return(One): present + online.
+    {
+        const uint8_t body[] = {
+            0x08, '_', 'H', 'I', 'D', 0x0D, 'A', 'C', 'P', 'I',
+            '0', '0', '0', '3', 0x00, // Name(_HID, "ACPI0003")
+            0x14, 0x09, '_', 'P', 'S', 'R', 0x00, 0xA4, 0x01, // Method(_PSR){Return(One)}
+        };
+        fake_dsdt = buf;
+        fake_len = emit_device(buf, "ACAD", body, sizeof(body));
+        struct acpi_ac_adapter ac;
+        memset(&ac, 0, sizeof(ac));
+        acpi_battery_refresh();
+        CHECK(acpi_ac_get(&ac) && ac.present);
+        CHECK(memcmp(ac.name, "ACAD", 4) == 0);
+        CHECK(ac.online_valid && ac.online);
+        CHECK(acpi_power_source() == ACPI_POWER_SOURCE_AC);
+        CHECK(!acpi_ec_present());
+    }
+    // Battery + AC with dynamic _PSR (no Return const): source unknown.
+    {
+        uint8_t both[128];
+        const uint8_t bat_body[] = {
+            0x08, '_', 'H', 'I', 'D', 0x0D, 'P', 'N', 'P', '0',
+            'C', '0', 'A', 0x00,
+        };
+        uint32_t n = emit_device(both, "BAT0", bat_body, sizeof(bat_body));
+        const uint8_t ac_body[] = {
+            0x08, '_', 'H', 'I', 'D', 0x0D, 'A', 'C', 'P', 'I',
+            '0', '0', '0', '3', 0x00,
+            0x14, 0x0B, '_', 'P', 'S', 'R', 0x00, 0xA4, 0x86, // dynamic
+            0x2F, 0x03, 0x00,
+        };
+        n += emit_device(both + n, "ACAD", ac_body, sizeof(ac_body));
+        fake_dsdt = both;
+        fake_len = n;
+        struct acpi_ac_adapter ac;
+        memset(&ac, 0, sizeof(ac));
+        acpi_battery_refresh();
+        CHECK(acpi_battery_get(&bat) && bat.present);
+        CHECK(acpi_ac_get(&ac) && ac.present);
+        CHECK(!ac.online_valid);
+        CHECK(acpi_power_source() == ACPI_POWER_SOURCE_UNKNOWN);
+    }
+    // _STA Return(Zero) device is ignored.
+    {
+        const uint8_t body[] = {
+            0x08, '_', 'H', 'I', 'D', 0x0D, 'P', 'N', 'P', '0',
+            'C', '0', 'A', 0x00,
+            0x08, '_', 'S', 'T', 'A', 0xA4, 0x00, // Name(_STA){Return(Zero)}
+        };
+        fake_dsdt = buf;
+        fake_len = emit_device(buf, "BAT0", body, sizeof(body));
+        memset(&bat, 0, sizeof(bat));
+        CHECK(!get_fresh(&bat) && !bat.present);
+    }
 
     if (!failures)
         printf("test_battery: all passed\n");
