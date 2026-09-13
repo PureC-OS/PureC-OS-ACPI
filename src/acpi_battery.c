@@ -23,6 +23,7 @@ static struct acpi_battery cached_bat;
 static struct acpi_ac_adapter cached_ac;
 static bool cached_ec;
 static bool cached_valid = false;
+static const uint8_t *table_bounded_end(const uint8_t *data);
 
 // Decode an AML PkgLength at p (bounded by end). Returns field size,
 // stores the length value. 0 = malformed.
@@ -239,17 +240,18 @@ static void scan_image(const uint8_t *data, const uint8_t *end) {
 static void scan_table_by_ptr(void *tbl) {
     if (!tbl)
         return;
-    struct {
-        char signature[4];
-        uint32_t length;
-    } __attribute__((packed)) *hdr = tbl;
-    if (hdr->length < 9 || hdr->length > 16 * 1024 * 1024)
-        return;
     const uint8_t *data = (const uint8_t *)tbl;
-    const uint8_t *end = data + hdr->length;
-    if (end <= data)
+    const uint8_t *end = table_bounded_end(data);
+    if (!end)
         return;
     scan_image(data, end);
+}
+static const uint8_t *table_bounded_end(const uint8_t *data) {
+    uint32_t len = (uint32_t)data[4] | ((uint32_t)data[5] << 8) |
+                   ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    if (len < 9 || len > 16 * 1024 * 1024)
+        return NULL;
+    return data + len;
 }
 
 void acpi_battery_refresh(void) {
@@ -271,11 +273,8 @@ void acpi_battery_refresh(void) {
     if (!cached_bat.present) {
         // Legacy signal: bare "BAT0" reference (method bodies, _BIF users).
         const uint8_t *data = (const uint8_t *)dsdt;
-        const uint8_t *end = data + ((uint32_t)data[4] |
-                                     ((uint32_t)data[5] << 8) |
-                                     ((uint32_t)data[6] << 16) |
-                                     ((uint32_t)data[7] << 24));
-        for (const uint8_t *p = data; p + 4 <= end; p++) {
+        const uint8_t *end = table_bounded_end(data);
+        if (end) for (const uint8_t *p = data; p + 4 <= end; p++) {
             if (memcmp(p, "BAT0", 4) == 0) {
                 cached_bat.present = true;
                 memcpy(cached_bat.name, "BAT0", 5);
@@ -310,12 +309,9 @@ void acpi_battery_refresh(void) {
     if (!cached_ac.present) {
         // Fallback: bare ACAD/ADP1 NameSeg reference without _HID.
         const uint8_t *data = (const uint8_t *)dsdt;
-        const uint8_t *end = data + ((uint32_t)data[4] |
-                                     ((uint32_t)data[5] << 8) |
-                                     ((uint32_t)data[6] << 16) |
-                                     ((uint32_t)data[7] << 24));
+        const uint8_t *end = table_bounded_end(data);
         static const char *ac_names[] = {"ACAD", "ADP1", "ACPI"};
-        for (unsigned n = 0; n < 3 && !cached_ac.present; n++) {
+        for (unsigned n = 0; n < 3 && !cached_ac.present && end; n++) {
             for (const uint8_t *p = data; p + 4 <= end; p++) {
                 if (memcmp(p, ac_names[n], 4) == 0) {
                     cached_ac.present = true;
