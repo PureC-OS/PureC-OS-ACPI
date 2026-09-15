@@ -1,7 +1,3 @@
-// PureC-OS ACPI: minimal _S5 parser for shutdown.
-// Full AML interpretation is out of scope; _S5 is a tiny constant package
-// (NameOp "_S5_" Package{2 ints}) on ~all real firmware, so a targeted
-// parser is enough to get correct SLP_TYPa/b without an AML engine.
 #include <acpi/acpi.h>
 #include <acpi/acpi_priv.h>
 
@@ -11,7 +7,6 @@
 static bool s5_valid = false;
 static uint16_t s5_a = 0, s5_b = 0;
 
-// AML integer opcodes we accept inside the _S5 package.
 #define AML_ZERO 0x00
 #define AML_ONE 0x01
 #define AML_ONES 0xFF
@@ -20,7 +15,6 @@ static uint16_t s5_a = 0, s5_b = 0;
 #define AML_DWORD_PREFIX 0x0C
 #define AML_PACKAGE_OP 0x12
 
-// Skip an AML PkgLength field, return its size in bytes (0 = invalid).
 static uint32_t pkglen_size(const uint8_t *p, const uint8_t *end) {
     if (p >= end)
         return 0;
@@ -31,7 +25,6 @@ static uint32_t pkglen_size(const uint8_t *p, const uint8_t *end) {
     return 1 + follow;
 }
 
-// Parse one AML integer at *pp (bounded by end). Returns false on garbage.
 static bool parse_aml_int(const uint8_t **pp, const uint8_t *end, uint32_t *out) {
     const uint8_t *p = *pp;
     if (p >= end)
@@ -69,10 +62,7 @@ static bool parse_aml_int(const uint8_t **pp, const uint8_t *end, uint32_t *out)
     return true;
 }
 
-// Try to parse _S5 at a NameSeg match. `name` points at "_S5_".
 static bool try_parse_at(const uint8_t *name, const uint8_t *end) {
-    // Layout: 0x08 "_S5_" PkgLength 0x12 PkgLength NumElements int int
-    // NameOp byte sits right before the NameSeg.
     if (name < (const uint8_t *)1 || name[-1] != 0x08)
         return false;
     const uint8_t *p = name + 4;
@@ -80,13 +70,12 @@ static bool try_parse_at(const uint8_t *name, const uint8_t *end) {
     if (!s)
         return false;
     p += s;
-    // PackageOp must follow within a couple of bytes (tolerate Algo quirks).
     const uint8_t *scan_end = p + 8 < end ? p + 8 : end;
     while (p < scan_end && *p != AML_PACKAGE_OP)
         p++;
     if (p >= scan_end)
         return false;
-    p++; // PackageOp
+    p++;
     s = pkglen_size(p, end);
     if (!s)
         return false;
@@ -101,7 +90,6 @@ static bool try_parse_at(const uint8_t *name, const uint8_t *end) {
         return false;
     if (!parse_aml_int(&p, end, &b))
         return false;
-    // SLP_TYP is 3 bits; OnesOp (0xFF...) or huge values mean garbage.
     if (a > 7 || b > 7)
         return false;
     s5_a = (uint16_t)a;

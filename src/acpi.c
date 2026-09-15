@@ -1,6 +1,3 @@
-// PureC-OS ACPI subsystem: RSDP/XSDT/RSDT/FADT discovery, GAS access,
-// ACPI enable via SMI_CMD, table dumps. Power sequences live in
-// acpi_power.c, _S5 parsing in acpi_s5.c.
 #include <acpi/acpi.h>
 #include <acpi/acpi_priv.h>
 
@@ -42,7 +39,6 @@ struct sdt_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
-// FADT legacy field offsets (stable ACPI 1.0 region).
 #define FADT_DSDT         40u
 #define FADT_SMI_CMD      48u
 #define FADT_ACPI_ENABLE  52u
@@ -51,10 +47,6 @@ struct sdt_header {
 #define FADT_PM1B_EVT     60u
 #define FADT_PM1A_CNT     64u
 #define FADT_PM1B_CNT     68u
-// ResetReg GAS candidates: strict packing puts it at 110, several
-// vendor tables/docs quote 116. We probe both and trust only a GAS
-// that validates (space/width/address sane), so a wrong offset is
-// harmless instead of a garbage port write.
 #define FADT_RESET_CANDIDATES_COUNT 2
 static const uint32_t fadt_reset_candidates[FADT_RESET_CANDIDATES_COUNT] = {110u, 116u};
 
@@ -162,7 +154,6 @@ static void gas_parse(struct acpi_gas *g, const uint8_t *f, uint32_t off) {
     g->addr = fadt_u64(f, off + 4);
 }
 
-// Root table lookup: prefer XSDT, fall back to RSDT.
 static void acpi_root_tables(struct sdt_header **xsdt, struct sdt_header **rsdt) {
     *xsdt = NULL;
     *rsdt = NULL;
@@ -275,8 +266,6 @@ static void delay_ms(uint32_t ms) {
         __asm__ volatile("pause");
 }
 
-// Switch legacy hardware into ACPI mode (SMI_CMD + ACPI_ENABLE),
-// required on real laptops: without SCI_EN the PM1 writes are ignored.
 static void acpi_enable(void) {
     if (!g_acpi_fadt.smi_cmd || !g_acpi_fadt.acpi_enable) {
         klog(KLOG_DEBUG, "acpi: no SMI_CMD/ACPI_ENABLE, assuming HW-reduced or already enabled");

@@ -1,22 +1,3 @@
-# PureC-OS ACPI subsystem.
-#
-# Build modes (same pattern as libxcrypt):
-#   make            syntax-check sources with the cross compiler
-#                   (real build compiles them straight into the kernel
-#                   image, see PureC-OS src/kernel/Makefile:
-#                   ACPI_SOURCES with KERNEL_CFLAGS and
-#                   -I$(ACPI_DIR)/include -I$(ROOT_DIR)/src)
-#   make module     relocatable kernel module acpi.elf/.ko
-#                   (same pattern as the ext2/crypt modules of PureC OS)
-#   make check      syntax-check only
-#   make clean      remove build artifacts
-#
-# When invoked from the PureC OS top-level Makefile, BIN_DIR points at the
-# OS bin/ tree so the module lands in bin/modules/. Standalone it defaults
-# to the local build/ directory.
-# KERNEL_SRC must point at the PureC-OS src/ tree (defaults to the
-# sibling checkout layout: <root>/acpi + <root>/src).
-
 CROSS ?= x86_64-elf-
 CC := $(CROSS)gcc
 LD := $(CROSS)ld
