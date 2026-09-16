@@ -10,6 +10,14 @@ struct acpi_fadt_cache g_acpi_fadt;
 
 static bool g_ready = false;
 static bool g_battery_present = false;
+static int g_battery_count = 0;
+static char g_battery_name[8] = {0};
+static uint8_t g_battery_seen = 0;
+static bool g_ac_present = false;
+static bool g_has_bif = false;
+static bool g_has_bst = false;
+static bool g_has_ec = false;
+static int g_ssdt_scanned = 0;
 
 struct rsdp_v1 {
     char     signature[8];
@@ -291,19 +299,162 @@ static void acpi_enable(void) {
     klog(KLOG_WARN, "acpi: SCI_EN not observed after ACPI_ENABLE, continuing anyway");
 }
 
-static void battery_probe(void) {
-    g_battery_present = false;
-    struct sdt_header *dsdt = (struct sdt_header *)acpi_find_table("DSDT");
-    if (!dsdt)
+static bool mem_has_str(const uint8_t *data, uint32_t len, const char *s) {
+    uint32_t sl = 0;
+    while (s[sl])
+        sl++;
+    if (!sl || len < sl)
+        return false;
+    for (uint32_t i = 0; i + sl <= len; i++) {
+        if (memcmp(data + i, s, sl) == 0)
+            return true;
+    }
+    return false;
+}
+
+static void scan_aml_blob(const uint8_t *data, uint32_t len, const char *tname) {
+    if (!data || len < 36)
         return;
-    const uint8_t *data = (const uint8_t *)dsdt;
-    for (uint32_t i = 0; i + 4 <= dsdt->length; i++) {
-        if (memcmp(data + i, "BAT0", 4) == 0) {
-            g_battery_present = true;
-            klogf(KLOG_DEBUG, "acpi: BAT0 device found in DSDT at offset %u", i);
-            return;
+    static const char *bat_names[] = {"BAT0", "BAT1", "BAT2", "BAT3"};
+    for (unsigned b = 0; b < 4; b++) {
+        if (mem_has_str(data, len, bat_names[b])) {
+            if (!(g_battery_seen & (uint8_t)(1u << b))) {
+                g_battery_seen |= (uint8_t)(1u << b);
+                if (g_battery_count == 0)
+                    memcpy(g_battery_name, bat_names[b], 4);
+                g_battery_count++;
+                g_battery_present = true;
+                klogf(KLOG_DEBUG, "acpi: %s found in %s", bat_names[b], tname);
+            }
         }
     }
+    if (mem_has_str(data, len, "PNP0C0A")) {
+        g_battery_present = true;
+        klogf(KLOG_DEBUG, "acpi: PNP0C0A (battery HID) in %s", tname);
+    }
+    if (mem_has_str(data, len, "ACPI0003") || mem_has_str(data, len, "ACAD") ||
+        mem_has_str(data, len, "ADP1")) {
+        if (!g_ac_present) {
+            g_ac_present = true;
+            klogf(KLOG_DEBUG, "acpi: AC adapter object in %s", tname);
+        }
+    }
+    if (mem_has_str(data, len, "PNP0C09")) {
+        if (!g_has_ec) {
+            g_has_ec = true;
+            klogf(KLOG_DEBUG, "acpi: PNP0C09 (EmbeddedController) in %s", tname);
+        }
+    }
+    if (mem_has_str(data, len, "_BIF") || mem_has_str(data, len, "_BIX")) {
+        if (!g_has_bif) {
+            g_has_bif = true;
+            klogf(KLOG_DEBUG, "acpi: _BIF/_BIX in %s", tname);
+        }
+    }
+    if (mem_has_str(data, len, "_BST")) {
+        if (!g_has_bst) {
+            g_has_bst = true;
+            klogf(KLOG_DEBUG, "acpi: _BST in %s", tname);
+        }
+    }
+}
+
+static void battery_probe(void) {
+    g_battery_present = false;
+    g_battery_count = 0;
+    memset(g_battery_name, 0, sizeof(g_battery_name));
+    g_battery_seen = 0;
+    g_ac_present = false;
+    g_has_bif = false;
+    g_has_bst = false;
+    g_has_ec = false;
+    g_ssdt_scanned = 0;
+
+    // DSDT via FADT pointer (not in XSDT) + fallback find
+    struct sdt_header *dsdt = NULL;
+    if (g_acpi_fadt.dsdt) {
+        struct sdt_header *d =
+            (struct sdt_header *)acpi_map_phys((uint64_t)g_acpi_fadt.dsdt);
+        if (d && d->length >= sizeof(struct sdt_header) &&
+            acpi_table_valid(d, d->length) && memcmp(d->signature, "DSDT", 4) == 0)
+            dsdt = d;
+    }
+    if (!dsdt)
+        dsdt = (struct sdt_header *)acpi_find_table("DSDT");
+    if (dsdt)
+        scan_aml_blob((const uint8_t *)dsdt, dsdt->length, "DSDT");
+    else
+        klog(KLOG_DEBUG, "acpi: no DSDT for battery scan");
+
+    // SSDTs enumerated from XSDT/RSDT (acpi_find_table returns only first)
+    struct sdt_header *xsdt = NULL, *rsdt = NULL;
+    // re-derive roots (same logic as acpi_root_tables, inlined to avoid fwd decl)
+    if (g_acpi_rsdp) {
+        struct rsdp_v1 *r = (struct rsdp_v1 *)g_acpi_rsdp;
+        if (r->revision >= 2) {
+            struct rsdp_v2 *r2 = (struct rsdp_v2 *)g_acpi_rsdp;
+            if (r2->xsdt_address) {
+                struct sdt_header *x =
+                    (struct sdt_header *)acpi_map_phys(r2->xsdt_address);
+                if (x && x->length >= sizeof(struct sdt_header) &&
+                    acpi_table_valid(x, x->length))
+                    xsdt = x;
+            }
+        }
+        if (r->rsdt_address) {
+            struct sdt_header *x =
+                (struct sdt_header *)acpi_map_phys(r->rsdt_address);
+            if (x && x->length >= sizeof(struct sdt_header) &&
+                acpi_table_valid(x, x->length))
+                rsdt = x;
+        }
+    }
+    struct sdt_header *roots[2] = {xsdt, rsdt};
+    for (int t = 0; t < 2; t++) {
+        struct sdt_header *root = roots[t];
+        if (!root)
+            continue;
+        bool wide = (root == xsdt);
+        uint32_t stride = wide ? 8u : 4u;
+        if (root->length < sizeof(struct sdt_header))
+            continue;
+        uint32_t entries = (root->length - sizeof(struct sdt_header)) / stride;
+        const uint8_t *base = (const uint8_t *)root + sizeof(struct sdt_header);
+        for (uint32_t i = 0; i < entries; i++) {
+            uint64_t addr = 0;
+            if (wide) {
+                for (int b = 7; b >= 0; b--)
+                    addr = (addr << 8) | base[i * 8 + (uint32_t)b];
+            } else {
+                for (int b = 3; b >= 0; b--)
+                    addr = (addr << 8) | base[i * 4 + (uint32_t)b];
+            }
+            if (!addr)
+                continue;
+            struct sdt_header *tbl = (struct sdt_header *)acpi_map_phys(addr);
+            if (!tbl || tbl->length < sizeof(struct sdt_header))
+                continue;
+            if (!acpi_table_valid(tbl, tbl->length))
+                continue;
+            if (memcmp(tbl->signature, "SSDT", 4) == 0) {
+                g_ssdt_scanned++;
+                scan_aml_blob((const uint8_t *)tbl, tbl->length, "SSDT");
+            }
+        }
+    }
+
+    if (acpi_find_table("ECDT")) {
+        g_has_ec = true;
+        klog(KLOG_DEBUG, "acpi: ECDT table present");
+    }
+
+    if (!g_battery_present)
+        memcpy(g_battery_name, "BAT0", 4);
+
+    klogf(KLOG_INFO,
+          "acpi: battery scan: present=%d count=%d name=%.4s ac=%d ec=%d bif=%d bst=%d ssdt=%d",
+          g_battery_present, g_battery_count, g_battery_name, g_ac_present,
+          g_has_ec, g_has_bif, g_has_bst, g_ssdt_scanned);
 }
 
 int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
@@ -367,6 +518,30 @@ bool acpi_is_ready(void) {
 
 bool acpi_has_battery(void) {
     return g_battery_present;
+}
+
+int acpi_battery_count(void) {
+    return g_battery_count;
+}
+
+const char *acpi_battery_name(void) {
+    return g_battery_name;
+}
+
+bool acpi_has_ac(void) {
+    return g_ac_present;
+}
+
+bool acpi_battery_has_bif(void) {
+    return g_has_bif;
+}
+
+bool acpi_battery_has_bst(void) {
+    return g_has_bst;
+}
+
+bool acpi_has_ec(void) {
+    return g_has_ec;
 }
 
 void acpi_dump_tables(void) {
@@ -438,5 +613,7 @@ void acpi_dump_tables(void) {
         klogf(KLOG_INFO, "acpi: _S5 SLP_TYPa=%u SLP_TYPb=%u", a, b);
     else
         klog(KLOG_WARN, "acpi: _S5 not parsed, shutdown will try SLP_TYP 7 then 5");
-    klogf(KLOG_INFO, "acpi: battery device: %s", g_battery_present ? "present (BAT0)" : "not found");
+    klogf(KLOG_INFO, "acpi: battery: present=%d count=%d name=%.4s ac=%d ec=%d bif=%d bst=%d",
+          g_battery_present, g_battery_count, g_battery_name, g_ac_present,
+          g_has_ec, g_has_bif, g_has_bst);
 }

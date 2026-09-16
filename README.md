@@ -17,7 +17,9 @@ into the kernel image (same integration pattern as `libxcrypt`).
 - Reboot: ResetReg → keyboard controller → CF9 → triple fault
 - Read-only MADT walk (LAPIC base, CPU/IOAPIC counts) + table dump
   via `klog` for bare-metal diagnostics
-- Battery presence probe (`BAT0` in DSDT)
+- Battery scan: `BAT0..BAT3`, `PNP0C0A`, AC (`ACPI0003`/`ACAD`/`ADP1`),
+  `_BIF`/`_BIX`/`_BST` flags, `SSDT` enumeration, `ECDT`/`PNP0C09`.
+  Dynamic values still UNKNOWN (`BATTERY_PERCENT_UNKNOWN`) — no AML executor yet.
 
 ## Layout
 
