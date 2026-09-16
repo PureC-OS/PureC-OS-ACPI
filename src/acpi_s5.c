@@ -104,7 +104,7 @@ void acpi_s5_parse(void) {
         char signature[4];
         uint32_t length;
     } __attribute__((packed)) *dsdt;
-    dsdt = acpi_find_table("DSDT");
+    dsdt = acpi_get_dsdt();
     if (!dsdt) {
         klog(KLOG_WARN, "acpi: no DSDT, _S5 unavailable");
         return;

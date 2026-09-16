@@ -15,6 +15,7 @@ struct acpi_fadt_cache {
     bool     present;
     uint8_t  rev;
     uint32_t dsdt;
+    uint64_t x_dsdt;
     uint32_t smi_cmd;
     uint8_t  acpi_enable;
     uint8_t  acpi_disable;
@@ -32,6 +33,7 @@ extern struct acpi_fadt_cache g_acpi_fadt;
 extern void *g_acpi_rsdp;
 extern uint64_t g_acpi_hhdm;
 void *acpi_map_phys(uint64_t phys);
+void *acpi_get_dsdt(void);
 uint8_t acpi_checksum(const void *p, uint32_t len);
 bool acpi_table_valid(const void *p, uint32_t len);
 bool acpi_gas_valid(const struct acpi_gas *g);

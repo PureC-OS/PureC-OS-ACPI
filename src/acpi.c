@@ -48,6 +48,7 @@ struct sdt_header {
 } __attribute__((packed));
 
 #define FADT_DSDT         40u
+#define FADT_X_DSDT       140u
 #define FADT_SMI_CMD      48u
 #define FADT_ACPI_ENABLE  52u
 #define FADT_ACPI_DISABLE 53u
@@ -224,6 +225,32 @@ void *acpi_find_table(const char *signature) {
     return NULL;
 }
 
+void *acpi_get_dsdt(void) {
+    // DSDT is NOT listed in RSDT/XSDT; it comes from FADT.
+    // Prefer X_DSDT (64-bit), fall back to DSDT (32-bit).
+    uint64_t candidates[2] = {g_acpi_fadt.x_dsdt, (uint64_t)g_acpi_fadt.dsdt};
+    for (int c = 0; c < 2; c++) {
+        if (!candidates[c])
+            continue;
+        struct sdt_header *d =
+            (struct sdt_header *)acpi_map_phys(candidates[c]);
+        if (!d || d->length < sizeof(struct sdt_header)) {
+            klogf(KLOG_DEBUG, "acpi: DSDT candidate %d bad header", c);
+            continue;
+        }
+        if (memcmp(d->signature, "DSDT", 4) != 0) {
+            klogf(KLOG_DEBUG, "acpi: DSDT candidate %d sig mismatch", c);
+            continue;
+        }
+        if (!acpi_table_valid(d, d->length)) {
+            klog(KLOG_WARN, "acpi: DSDT checksum failed");
+            continue;
+        }
+        return d;
+    }
+    return acpi_find_table("DSDT");
+}
+
 static void fadt_parse(struct sdt_header *fadt) {
     memset(&g_acpi_fadt, 0, sizeof(g_acpi_fadt));
     g_acpi_fadt.reset_reg_off = -1;
@@ -235,6 +262,8 @@ static void fadt_parse(struct sdt_header *fadt) {
     g_acpi_fadt.rev = fadt->revision;
     if (len > FADT_DSDT)
         g_acpi_fadt.dsdt = fadt_u32(f, FADT_DSDT);
+    if (len >= FADT_X_DSDT + 8)
+        g_acpi_fadt.x_dsdt = fadt_u64(f, FADT_X_DSDT);
     if (len > FADT_SMI_CMD)
         g_acpi_fadt.smi_cmd = fadt_u32(f, FADT_SMI_CMD);
     if (len > FADT_ACPI_ENABLE)
@@ -370,21 +399,13 @@ static void battery_probe(void) {
     g_has_ec = false;
     g_ssdt_scanned = 0;
 
-    // DSDT via FADT pointer (not in XSDT) + fallback find
-    struct sdt_header *dsdt = NULL;
-    if (g_acpi_fadt.dsdt) {
-        struct sdt_header *d =
-            (struct sdt_header *)acpi_map_phys((uint64_t)g_acpi_fadt.dsdt);
-        if (d && d->length >= sizeof(struct sdt_header) &&
-            acpi_table_valid(d, d->length) && memcmp(d->signature, "DSDT", 4) == 0)
-            dsdt = d;
-    }
-    if (!dsdt)
-        dsdt = (struct sdt_header *)acpi_find_table("DSDT");
+    klogf(KLOG_DEBUG, "acpi: FADT dsdt=0x%x x_dsdt=0x%x",
+          g_acpi_fadt.dsdt, (unsigned)g_acpi_fadt.x_dsdt);
+    struct sdt_header *dsdt = (struct sdt_header *)acpi_get_dsdt();
     if (dsdt)
         scan_aml_blob((const uint8_t *)dsdt, dsdt->length, "DSDT");
     else
-        klog(KLOG_DEBUG, "acpi: no DSDT for battery scan");
+        klog(KLOG_WARN, "acpi: no DSDT for battery scan");
 
     // SSDTs enumerated from XSDT/RSDT (acpi_find_table returns only first)
     struct sdt_header *xsdt = NULL, *rsdt = NULL;
@@ -448,11 +469,13 @@ static void battery_probe(void) {
         klog(KLOG_DEBUG, "acpi: ECDT table present");
     }
 
-    if (!g_battery_present)
-        memcpy(g_battery_name, "BAT0", 4);
+    if (!g_battery_present) {
+        memset(g_battery_name, 0, sizeof(g_battery_name));
+        memcpy(g_battery_name, "-", 1);
+    }
 
     klogf(KLOG_INFO,
-          "acpi: battery scan: present=%d count=%d name=%.4s ac=%d ec=%d bif=%d bst=%d ssdt=%d",
+          "acpi: battery scan: present=%d count=%d name=%s ac=%d ec=%d bif=%d bst=%d ssdt=%d",
           g_battery_present, g_battery_count, g_battery_name, g_ac_present,
           g_has_ec, g_has_bif, g_has_bst, g_ssdt_scanned);
 }
@@ -477,7 +500,12 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
         klog(KLOG_ERROR, "acpi: RSDP v1 checksum mismatch");
         return -2;
     }
-    klogf(KLOG_INFO, "acpi: RSDP rev=%u oem=%.6s", r->revision, r->oemid);
+    {
+        char oem[7];
+        memcpy(oem, r->oemid, 6);
+        oem[6] = '\0';
+        klogf(KLOG_INFO, "acpi: RSDP rev=%u oem=%s", r->revision, oem);
+    }
     if (r->revision >= 2) {
         struct rsdp_v2 *r2 = (struct rsdp_v2 *)g_acpi_rsdp;
         if (r2->length >= 36 && acpi_checksum(r2, 36) != 0) {
@@ -579,8 +607,13 @@ void acpi_dump_tables(void) {
                 klogf(KLOG_WARN, "acpi:   [%u] invalid table at 0x%llx", i, (unsigned long long)addr);
                 continue;
             }
-            klogf(KLOG_INFO, "acpi:   [%u] %.4s len=%u rev=%u", i,
-                  tbl->signature, tbl->length, tbl->revision);
+            {
+                char sig[5];
+                memcpy(sig, tbl->signature, 4);
+                sig[4] = '\0';
+                klogf(KLOG_INFO, "acpi:   [%u] %s len=%u rev=%u", i,
+                      sig, tbl->length, tbl->revision);
+            }
         }
     }
     struct sdt_header *madt = (struct sdt_header *)acpi_find_table("APIC");
@@ -613,7 +646,7 @@ void acpi_dump_tables(void) {
         klogf(KLOG_INFO, "acpi: _S5 SLP_TYPa=%u SLP_TYPb=%u", a, b);
     else
         klog(KLOG_WARN, "acpi: _S5 not parsed, shutdown will try SLP_TYP 7 then 5");
-    klogf(KLOG_INFO, "acpi: battery: present=%d count=%d name=%.4s ac=%d ec=%d bif=%d bst=%d",
+    klogf(KLOG_INFO, "acpi: battery: present=%d count=%d name=%s ac=%d ec=%d bif=%d bst=%d",
           g_battery_present, g_battery_count, g_battery_name, g_ac_present,
           g_has_ec, g_has_bif, g_has_bst);
 }
