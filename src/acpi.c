@@ -639,6 +639,12 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
     acpi_s5_parse();
     battery_probe();
 
+    uacpi_glue_set_rsdp(g_acpi_rsdp, g_acpi_hhdm);
+    if (acpi_uacpi_early_init() == 0)
+        acpi_uacpi_dump();
+    else
+        klog(KLOG_WARN, "acpi: uACPI early table access failed, using manual parser");
+
     g_ready = true;
     klog(KLOG_OK, "acpi: subsystem ready");
     return 0;
