@@ -25,7 +25,9 @@ struct acpi_madt_info {
 bool acpi_get_madt(struct acpi_madt_info *out);
 void uacpi_glue_set_rsdp(void *rsdp_virt, uint64_t hhdm);
 int acpi_uacpi_early_init(void);
+int acpi_uacpi_full_init(void);
 bool acpi_uacpi_tables_ready(void);
+bool acpi_uacpi_full_ready(void);
 bool acpi_uacpi_find_table(const char *sig, void **out_ptr, uint32_t *out_len);
 void acpi_uacpi_dump(void);
 bool acpi_get_slp_typ(uint16_t *slp_typa, uint16_t *slp_typb);
