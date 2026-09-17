@@ -18,7 +18,7 @@ static bool g_has_bif = false;
 static bool g_has_bst = false;
 static bool g_has_ec = false;
 static int g_ssdt_scanned = 0;
- 
+
 struct rsdp_v1 {
     char     signature[8];
     uint8_t  checksum;
