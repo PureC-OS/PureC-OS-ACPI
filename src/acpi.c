@@ -49,6 +49,7 @@ struct sdt_header {
 
 #define FADT_DSDT         40u
 #define FADT_X_DSDT       140u
+#define FADT_SCI_INT      46u
 #define FADT_SMI_CMD      48u
 #define FADT_ACPI_ENABLE  52u
 #define FADT_ACPI_DISABLE 53u
@@ -342,6 +343,13 @@ static void madt_parse_into(struct acpi_madt_info *out) {
     }
 }
 
+bool acpi_get_sci_irq(uint16_t *out) {
+    if (!out || !g_acpi_fadt.has_sci_int)
+        return false;
+    *out = g_acpi_fadt.sci_int;
+    return true;
+}
+
 bool acpi_get_madt(struct acpi_madt_info *out) {
     if (!out)
         return false;
@@ -366,6 +374,12 @@ static void fadt_parse(struct sdt_header *fadt) {
         g_acpi_fadt.dsdt = fadt_u32(f, FADT_DSDT);
     if (len >= FADT_X_DSDT + 8)
         g_acpi_fadt.x_dsdt = fadt_u64(f, FADT_X_DSDT);
+    if (len > FADT_SCI_INT + 1) {
+        g_acpi_fadt.sci_int =
+            (uint16_t)((uint16_t)f[FADT_SCI_INT] |
+                       ((uint16_t)f[FADT_SCI_INT + 1] << 8));
+        g_acpi_fadt.has_sci_int = true;
+    }
     if (len > FADT_SMI_CMD)
         g_acpi_fadt.smi_cmd = fadt_u32(f, FADT_SMI_CMD);
     if (len > FADT_ACPI_ENABLE)
@@ -443,11 +457,19 @@ static bool mem_has_str(const uint8_t *data, uint32_t len, const char *s) {
     return false;
 }
 
+static void scan_aml_blob(const uint8_t *data, uint32_t len,
+                            const char *tname);
+
+void acpi_scan_blob(const uint8_t *data, uint32_t len, const char *tname) {
+    scan_aml_blob(data, len, tname);
+}
+
 static void scan_aml_blob(const uint8_t *data, uint32_t len, const char *tname) {
     if (!data || len < 36)
         return;
-    static const char *bat_names[] = {"BAT0", "BAT1", "BAT2", "BAT3"};
-    for (unsigned b = 0; b < 4; b++) {
+    static const char *bat_names[] = {"BAT0", "BAT1", "BAT2", "BAT3",
+                                        "BATT", "BATC"};
+    for (unsigned b = 0; b < 6; b++) {
         if (mem_has_str(data, len, bat_names[b])) {
             if (!(g_battery_seen & (uint8_t)(1u << b))) {
                 g_battery_seen |= (uint8_t)(1u << b);
@@ -624,9 +646,10 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
         return -3;
     }
     fadt_parse(fadt);
-    klogf(KLOG_INFO, "acpi: FADT rev=%u len=%u dsdt=0x%x pm1a_cnt=0x%x pm1b_cnt=0x%x",
+    klogf(KLOG_INFO, "acpi: FADT rev=%u len=%u dsdt=0x%x pm1a_cnt=0x%x pm1b_cnt=0x%x sci=%u",
           g_acpi_fadt.rev, fadt->length, g_acpi_fadt.dsdt,
-          g_acpi_fadt.pm1a_cnt, g_acpi_fadt.pm1b_cnt);
+          g_acpi_fadt.pm1a_cnt, g_acpi_fadt.pm1b_cnt,
+          g_acpi_fadt.has_sci_int ? g_acpi_fadt.sci_int : 0xFFFF);
     if (g_acpi_fadt.has_reset_reg)
         klogf(KLOG_INFO, "acpi: ResetReg validated at FADT+%d space=%u width=%u addr=0x%llx val=0x%x",
               g_acpi_fadt.reset_reg_off, g_acpi_fadt.reset_reg.space,
@@ -644,6 +667,14 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
         if (acpi_uacpi_full_init() == 0) {
             klog(KLOG_OK, "acpi: uACPI full mode active");
             acpi_ec_init();
+            acpi_uacpi_rescan_tables();
+            if (!g_battery_present &&
+                acpi_battery_present_in_namespace()) {
+                g_battery_present = true;
+                if (!g_battery_name[0] || g_battery_name[0] == '-')
+                    memcpy(g_battery_name, "BAT", 3);
+                klog(KLOG_INFO, "acpi: battery found via namespace walk");
+            }
         } else
             klog(KLOG_WARN, "acpi: uACPI full init failed, tables only");
         acpi_uacpi_dump();

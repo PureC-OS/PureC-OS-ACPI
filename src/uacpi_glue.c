@@ -6,6 +6,7 @@ void *acpi_map_phys(unsigned long long phys);
 #include "drivers/interrupts/timer.h"
 #include "kernel/process/scheduler.h"
 #include "drivers/pci/pci.h"
+#include "arch/x86_64/idt/include/idt.h"
 
 #include <uacpi/kernel_api.h>
 #include <uacpi/tables.h>
@@ -261,21 +262,47 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *req) {
     return UACPI_STATUS_OK;
 }
 
+struct uacpi_irq_handle {
+    uint32_t irq;
+    uacpi_interrupt_handler handler;
+    uacpi_handle ctx;
+};
+
 uacpi_status uacpi_kernel_install_interrupt_handler(
     uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx,
     uacpi_handle *out_irq_handle) {
-    (void)irq;
-    (void)handler;
-    (void)ctx;
-    (void)out_irq_handle;
-    return UACPI_STATUS_UNIMPLEMENTED;
+    if (!handler || !out_irq_handle)
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    if (irq >= 16) {
+        klogf(KLOG_WARN, "acpi: SCI irq %u needs IOAPIC, not supported",
+              (unsigned)irq);
+        return UACPI_STATUS_UNIMPLEMENTED;
+    }
+    struct uacpi_irq_handle *h = uheap_alloc(sizeof(*h));
+    if (!h)
+        return UACPI_STATUS_OUT_OF_MEMORY;
+    h->irq = irq;
+    h->handler = handler;
+    h->ctx = ctx;
+    idt_set_irq_handler((uint8_t)irq, (void *)handler, ctx);
+    idt_unmask_irq((uint8_t)irq);
+    *out_irq_handle = (uacpi_handle)h;
+    klogf(KLOG_OK, "acpi: IRQ %u handler installed", (unsigned)irq);
+    return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_uninstall_interrupt_handler(
     uacpi_interrupt_handler handler, uacpi_handle irq_handle) {
+    struct uacpi_irq_handle *h = (struct uacpi_irq_handle *)irq_handle;
+    if (!h)
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    if (h->irq < 16) {
+        idt_mask_irq((uint8_t)h->irq);
+        idt_clear_irq_handler((uint8_t)h->irq);
+    }
     (void)handler;
-    (void)irq_handle;
-    return UACPI_STATUS_UNIMPLEMENTED;
+    uheap_free(h);
+    return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_schedule_work(
@@ -574,6 +601,28 @@ static uacpi_iteration_decision uacpi_dump_dev(
     klogf(KLOG_INFO, "acpi: dev %s", hid->value ? hid->value : "?");
     uacpi_free_id_string(hid);
     return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+void acpi_uacpi_rescan_tables(void) {
+    if (!g_uacpi_tables_ready)
+        return;
+    uacpi_size n = uacpi_table_count();
+    for (uacpi_size i = 0; i < n; i++) {
+        uacpi_table tbl;
+        if (uacpi_table_get_by_index(i, &tbl) != UACPI_STATUS_OK)
+            continue;
+        const char *sig = tbl.hdr->signature;
+        char s[5];
+        s[0] = sig[0];
+        s[1] = sig[1];
+        s[2] = sig[2];
+        s[3] = sig[3];
+        s[4] = '\0';
+        if ((s[0] == 'D' && s[1] == 'S' && s[2] == 'D' && s[3] == 'T') ||
+            (s[0] == 'S' && s[1] == 'S' && s[2] == 'D' && s[3] == 'T'))
+            acpi_scan_blob((const uint8_t *)tbl.ptr, tbl.hdr->length, s);
+        uacpi_table_unref(&tbl);
+    }
 }
 
 void acpi_uacpi_dump(void) {

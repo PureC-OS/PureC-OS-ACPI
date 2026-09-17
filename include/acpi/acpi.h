@@ -23,6 +23,7 @@ struct acpi_madt_info {
     uint8_t lapic_ids[ACPI_MADT_MAX_CPUS];
 };
 bool acpi_get_madt(struct acpi_madt_info *out);
+bool acpi_get_sci_irq(uint16_t *out);
 void uacpi_glue_set_rsdp(void *rsdp_virt, uint64_t hhdm);
 int acpi_uacpi_early_init(void);
 int acpi_uacpi_full_init(void);
@@ -30,6 +31,8 @@ bool acpi_uacpi_tables_ready(void);
 bool acpi_uacpi_full_ready(void);
 bool acpi_uacpi_find_table(const char *sig, void **out_ptr, uint32_t *out_len);
 void acpi_uacpi_dump(void);
+void acpi_uacpi_rescan_tables(void);
+void acpi_scan_blob(const uint8_t *data, uint32_t len, const char *tname);
 void acpi_ec_init(void);
 bool acpi_ec_ready(void);
 bool acpi_ec_read(uint8_t offset, uint8_t *out);
@@ -45,6 +48,7 @@ struct acpi_battery_live {
     char model[16];
 };
 bool acpi_battery_refresh(struct acpi_battery_live *out);
+bool acpi_battery_present_in_namespace(void);
 bool acpi_get_slp_typ(uint16_t *slp_typa, uint16_t *slp_typb);
 bool acpi_has_battery(void);
 int acpi_battery_count(void);

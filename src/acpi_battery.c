@@ -81,6 +81,12 @@ static uacpi_namespace_node *battery_find_node(void) {
     return ctx.hid_match ? ctx.hid_match : ctx.any_bif;
 }
 
+bool acpi_battery_present_in_namespace(void) {
+    if (!acpi_uacpi_full_ready())
+        return false;
+    return battery_find_node() != NULL;
+}
+
 bool acpi_battery_refresh(struct acpi_battery_live *out) {
     if (out)
         memset(out, 0, sizeof(*out));

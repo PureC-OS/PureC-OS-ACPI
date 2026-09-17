@@ -27,6 +27,8 @@ struct acpi_fadt_cache {
     uint8_t  reset_value;
     bool     has_reset_reg;
     int      reset_reg_off;
+    uint16_t sci_int;
+    bool     has_sci_int;
 };
 
 extern struct acpi_fadt_cache g_acpi_fadt;
