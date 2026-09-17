@@ -57,5 +57,46 @@ bool acpi_has_ac(void);
 bool acpi_battery_has_bif(void);
 bool acpi_battery_has_bst(void);
 bool acpi_has_ec(void);
+
+/* AML namespace inventory consumed by the kernel device manager. */
+#define ACPI_NAMESPACE_ID_MAX 32
+enum acpi_namespace_device_type {
+    ACPI_NAMESPACE_DEVICE = 1,
+    ACPI_NAMESPACE_PROCESSOR,
+    ACPI_NAMESPACE_THERMAL_ZONE,
+};
+struct acpi_namespace_device {
+    enum acpi_namespace_device_type type;
+    char name[5];
+    char hid[ACPI_NAMESPACE_ID_MAX];
+    char uid[ACPI_NAMESPACE_ID_MAX];
+    uint64_t address;
+    uint32_t status;
+    uint32_t irq;
+    bool has_i2c;
+    uint16_t i2c_address;
+    uint32_t i2c_speed_hz;
+    char i2c_controller[ACPI_NAMESPACE_ID_MAX];
+    bool enabled;
+};
+typedef bool (*acpi_namespace_device_visitor)(
+    const struct acpi_namespace_device *device, void *ctx);
+bool acpi_for_each_namespace_device(acpi_namespace_device_visitor visitor,
+                                    void *ctx);
+
+#define ACPI_THERMAL_MAX_ZONES 8
+#define ACPI_THERMAL_MAX_FANS 8
+struct acpi_thermal_info {
+    bool available;
+    uint32_t zone_count;
+    uint32_t fan_count;
+    /* Tenths of a degree Celsius; INT32_MIN means firmware gave no value. */
+    int32_t temperature_deci_c;
+    /* Revolutions per minute; zero means unavailable or stopped. */
+    uint32_t fan_rpm;
+    char zone_name[ACPI_NAMESPACE_ID_MAX];
+    char fan_name[ACPI_NAMESPACE_ID_MAX];
+};
+bool acpi_thermal_get(struct acpi_thermal_info *out);
 void acpi_shutdown(void);
 void acpi_reboot(void);

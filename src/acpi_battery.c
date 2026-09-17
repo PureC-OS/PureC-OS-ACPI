@@ -97,29 +97,16 @@ bool acpi_battery_refresh(struct acpi_battery_live *out) {
     if (!bat)
         return false;
 
-bool acpi_battery_refresh(struct acpi_battery_live *out) {
-    if (out)
-        memset(out, 0, sizeof(*out));
-    if (!out || !acpi_uacpi_full_ready())
-        return false;
-    for (int pass = 0; pass < 8; pass++) {
-        uacpi_namespace_node *bat = battery_find_node_pass(pass);
-        if (!bat) {
-            if (pass == 0)
-                return false;
-            break;
+    out->present = true;
+    bool sta_says_absent = false;
+    uint64_t sta = 0;
+    if (uacpi_eval_simple_integer(bat, "_STA", &sta) == UACPI_STATUS_OK) {
+        if ((sta & 0x01) == 0) {
+            sta_says_absent = true;
+            klogf(KLOG_DEBUG, "acpi: battery _STA=0x%llx; probing _BIF/_BST",
+                  (unsigned long long)sta);
         }
-
-        uint64_t sta = 0;
-        bool have_sta = uacpi_eval_simple_integer(bat, "_STA", &sta) ==
-                        UACPI_STATUS_OK;
-        if (have_info_sta_absent(have_sta_ok, sta))
-            continue;
-
-        return battery_read_live(bat, out);
     }
-    return false;
-}
 
     uint64_t unit = 0, design = 0, full = 0, voltage = 0;
     bool have_info = false;
@@ -151,8 +138,13 @@ bool acpi_battery_refresh(struct acpi_battery_live *out) {
         uacpi_object_unref(pkg);
         pkg = NULL;
     }
-    if (!have_info || full == 0)
+    if (!have_info || full == 0) {
+        if (sta_says_absent) {
+            out->present = false;
+            out->valid = true;
+        }
         return false;
+    }
 
     uint64_t state = 0, rate = 0, remaining = 0, present_volt = 0;
     if (uacpi_eval_simple_package(bat, "_BST", &pkg) != UACPI_STATUS_OK)
