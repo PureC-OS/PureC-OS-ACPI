@@ -98,12 +98,13 @@ bool acpi_battery_refresh(struct acpi_battery_live *out) {
         return false;
 
     out->present = true;
+    bool sta_says_absent = false;
     uint64_t sta = 0;
     if (uacpi_eval_simple_integer(bat, "_STA", &sta) == UACPI_STATUS_OK) {
         if ((sta & 0x01) == 0) {
-            out->present = false;
-            out->valid = true;
-            return true;
+            sta_says_absent = true;
+            klogf(KLOG_DEBUG, "acpi: battery _STA=0x%llx; probing _BIF/_BST",
+                  (unsigned long long)sta);
         }
     }
 
@@ -137,8 +138,13 @@ bool acpi_battery_refresh(struct acpi_battery_live *out) {
         uacpi_object_unref(pkg);
         pkg = NULL;
     }
-    if (!have_info || full == 0)
+    if (!have_info || full == 0) {
+        if (sta_says_absent) {
+            out->present = false;
+            out->valid = true;
+        }
         return false;
+    }
 
     uint64_t state = 0, rate = 0, remaining = 0, present_volt = 0;
     if (uacpi_eval_simple_package(bat, "_BST", &pkg) != UACPI_STATUS_OK)
