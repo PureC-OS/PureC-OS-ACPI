@@ -251,6 +251,108 @@ void *acpi_get_dsdt(void) {
     return acpi_find_table("DSDT");
 }
 
+void acpi_for_each_table(const char *signature, acpi_table_visitor visitor, void *ctx) {
+    if (!visitor)
+        return;
+    struct sdt_header *xsdt = NULL, *rsdt = NULL;
+    acpi_root_tables(&xsdt, &rsdt);
+    struct sdt_header *roots[2] = {xsdt, rsdt};
+    for (int t = 0; t < 2; t++) {
+        struct sdt_header *root = roots[t];
+        if (!root || root->length < sizeof(struct sdt_header))
+            continue;
+        bool wide = (root == xsdt);
+        uint32_t stride = wide ? 8u : 4u;
+        uint32_t entries = (root->length - sizeof(struct sdt_header)) / stride;
+        const uint8_t *base = (const uint8_t *)root + sizeof(struct sdt_header);
+        for (uint32_t i = 0; i < entries; i++) {
+            uint64_t addr = 0;
+            if (wide) {
+                for (int b = 7; b >= 0; b--)
+                    addr = (addr << 8) | base[i * 8 + (uint32_t)b];
+            } else {
+                for (int b = 3; b >= 0; b--)
+                    addr = (addr << 8) | base[i * 4 + (uint32_t)b];
+            }
+            if (!addr)
+                continue;
+            struct sdt_header *tbl = (struct sdt_header *)acpi_map_phys(addr);
+            if (!tbl || tbl->length < sizeof(struct sdt_header))
+                continue;
+            if (!acpi_table_valid(tbl, tbl->length))
+                continue;
+            if (signature && memcmp(tbl->signature, signature, 4) != 0)
+                continue;
+            visitor(tbl->signature, tbl, tbl->length, ctx);
+        }
+    }
+}
+
+static struct acpi_madt_info g_madt_cache;
+static bool g_madt_parsed = false;
+
+static void madt_parse_into(struct acpi_madt_info *out) {
+    memset(out, 0, sizeof(*out));
+    struct sdt_header *madt = (struct sdt_header *)acpi_find_table("APIC");
+    if (!madt || madt->length < 44)
+        return;
+    const uint8_t *m = (const uint8_t *)madt;
+    out->lapic_base = (uint32_t)m[36] | ((uint32_t)m[37] << 8) |
+                      ((uint32_t)m[38] << 16) | ((uint32_t)m[39] << 24);
+    out->present = true;
+    uint32_t off = 44;
+    while (off + 2 <= madt->length) {
+        uint8_t type = m[off], len = m[off + 1];
+        if (len < 2 || off + len > madt->length)
+            break;
+        switch (type) {
+        case 0:
+            out->total_cpus++;
+            if (len >= 8 && (m[off + 4] & 0x01)) {
+                if (out->enabled_cpus < ACPI_MADT_MAX_CPUS)
+                    out->lapic_ids[out->enabled_cpus] = m[off + 3];
+                out->enabled_cpus++;
+            }
+            break;
+        case 1:
+            if (len >= 12) {
+                uint32_t addr = (uint32_t)m[off + 4] | ((uint32_t)m[off + 5] << 8) |
+                                ((uint32_t)m[off + 6] << 16) | ((uint32_t)m[off + 7] << 24);
+                if (out->ioapic_count == 0)
+                    out->ioapic_first_addr = addr;
+                out->ioapic_count++;
+            }
+            break;
+        case 2:
+            out->iso_count++;
+            break;
+        case 3:
+            out->nmi_count++;
+            break;
+        case 4:
+            out->lapic_nmi_count++;
+            break;
+        case 5:
+            out->override_count++;
+            break;
+        default:
+            break;
+        }
+        off += len;
+    }
+}
+
+bool acpi_get_madt(struct acpi_madt_info *out) {
+    if (!out)
+        return false;
+    if (!g_madt_parsed) {
+        madt_parse_into(&g_madt_cache);
+        g_madt_parsed = true;
+    }
+    *out = g_madt_cache;
+    return g_madt_cache.present;
+}
+
 static void fadt_parse(struct sdt_header *fadt) {
     memset(&g_acpi_fadt, 0, sizeof(g_acpi_fadt));
     g_acpi_fadt.reset_reg_off = -1;
@@ -484,6 +586,8 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
     g_acpi_rsdp = rsdp_address;
     g_acpi_hhdm = hhdm_offset;
     g_ready = false;
+    g_madt_parsed = false;
+    memset(&g_madt_cache, 0, sizeof(g_madt_cache));
     memset(&g_acpi_fadt, 0, sizeof(g_acpi_fadt));
     g_acpi_fadt.reset_reg_off = -1;
 
@@ -616,26 +720,10 @@ void acpi_dump_tables(void) {
             }
         }
     }
-    struct sdt_header *madt = (struct sdt_header *)acpi_find_table("APIC");
-    if (madt && madt->length >= 44) {
-        const uint8_t *m = (const uint8_t *)madt;
-        uint32_t lapic = (uint32_t)m[36] | ((uint32_t)m[37] << 8) |
-                         ((uint32_t)m[38] << 16) | ((uint32_t)m[39] << 24);
-        uint32_t counts[6] = {0, 0, 0, 0, 0, 0};
-        uint32_t off = 44;
-        uint32_t cpus = 0;
-        while (off + 2 <= madt->length) {
-            uint8_t type = m[off], len = m[off + 1];
-            if (len < 2 || off + len > madt->length)
-                break;
-            if (type < 6)
-                counts[type]++;
-            if (type == 0 && len >= 8 && (m[off + 4] & 0x01))
-                cpus++;
-            off += len;
-        }
-        klogf(KLOG_INFO, "acpi: MADT lapic_base=0x%x enabled_cpus=%u ioapic=%u iso=%u nmi=%u lapic_nmi=%u lapic_override=%u",
-              lapic, cpus, counts[1], counts[2], counts[3], counts[4], counts[5]);
+    struct acpi_madt_info mi;
+    if (acpi_get_madt(&mi)) {
+        klogf(KLOG_INFO, "acpi: MADT lapic_base=0x%x enabled_cpus=%u total_cpus=%u ioapic=%u iso=%u nmi=%u lapic_nmi=%u lapic_override=%u ioapic_addr=0x%x",
+              mi.lapic_base, mi.enabled_cpus, mi.total_cpus, mi.ioapic_count, mi.iso_count, mi.nmi_count, mi.lapic_nmi_count, mi.override_count, mi.ioapic_first_addr);
     } else {
         klog(KLOG_WARN, "acpi: MADT (APIC) not found");
     }
