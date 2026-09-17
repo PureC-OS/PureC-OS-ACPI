@@ -641,9 +641,10 @@ int acpi_init(void *rsdp_address, uint64_t hhdm_offset) {
 
     uacpi_glue_set_rsdp(g_acpi_rsdp, g_acpi_hhdm);
     if (acpi_uacpi_early_init() == 0) {
-        if (acpi_uacpi_full_init() == 0)
+        if (acpi_uacpi_full_init() == 0) {
             klog(KLOG_OK, "acpi: uACPI full mode active");
-        else
+            acpi_ec_init();
+        } else
             klog(KLOG_WARN, "acpi: uACPI full init failed, tables only");
         acpi_uacpi_dump();
     } else

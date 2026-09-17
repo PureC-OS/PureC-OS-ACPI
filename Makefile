@@ -15,7 +15,7 @@ BUILD := $(ACPI_DIR)/build/obj
 
 UACPI_SOURCES := $(wildcard $(ACPI_DIR)/AML/uACPI/source/*.c)
 UACPI_SOURCES := $(UACPI_SOURCES:$(ACPI_DIR)/%=%)
-SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c src/uacpi_glue.c src/uacpi_heap.c $(UACPI_SOURCES)
+SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c src/uacpi_glue.c src/uacpi_heap.c src/acpi_ec.c src/acpi_battery.c $(UACPI_SOURCES)
 MOD_OBJS := $(SOURCES:%.c=$(BUILD)/%.k.o)
 MOD_ELF := $(MODULE_DIR)/acpi.elf
 MOD_KO := $(MODULE_DIR)/acpi.ko
