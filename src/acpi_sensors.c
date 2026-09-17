@@ -4,6 +4,7 @@
 #include "lib/string.h"
 
 #include <uacpi/namespace.h>
+#include <uacpi/resources.h>
 #include <uacpi/status.h>
 #include <uacpi/types.h>
 #include <uacpi/uacpi.h>
@@ -114,6 +115,29 @@ bool acpi_thermal_get(struct acpi_thermal_info *out) {
 
 struct namespace_walk_ctx { acpi_namespace_device_visitor visitor; void *ctx; bool any; };
 
+struct resource_extract_ctx { struct acpi_namespace_device *dev; };
+
+static uacpi_iteration_decision resource_extract_cb(void *opaque,
+                                                    uacpi_resource *res) {
+    struct resource_extract_ctx *ctx = opaque;
+    struct acpi_namespace_device *dev = ctx->dev;
+    if (res->type == UACPI_RESOURCE_TYPE_SERIAL_I2C_CONNECTION &&
+        !dev->has_i2c) {
+        dev->has_i2c = true;
+        dev->i2c_address = res->i2c_connection.slave_address;
+        dev->i2c_speed_hz = res->i2c_connection.connection_speed;
+        copy_id(dev->i2c_controller, sizeof(dev->i2c_controller),
+                res->i2c_connection.common.source.string);
+    } else if (res->type == UACPI_RESOURCE_TYPE_IRQ && !dev->irq &&
+               res->irq.num_irqs) {
+        dev->irq = res->irq.irqs[0];
+    } else if (res->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ && !dev->irq &&
+               res->extended_irq.num_irqs) {
+        dev->irq = res->extended_irq.irqs[0];
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
 static uacpi_iteration_decision namespace_walk_cb(void *opaque,
                                                    uacpi_namespace_node *node,
                                                    uacpi_u32 depth) {
@@ -142,6 +166,9 @@ static uacpi_iteration_decision namespace_walk_cb(void *opaque,
         copy_id(dev.uid, sizeof(dev.uid), id->value); uacpi_free_id_string(id);
     }
     (void)uacpi_eval_adr(node, &dev.address);
+    struct resource_extract_ctx resources = { &dev };
+    (void)uacpi_for_each_device_resource(node, "_CRS", resource_extract_cb,
+                                         &resources);
     walk->any = true;
     return walk->visitor(&dev, walk->ctx) ? UACPI_ITERATION_DECISION_CONTINUE
                                            : UACPI_ITERATION_DECISION_BREAK;

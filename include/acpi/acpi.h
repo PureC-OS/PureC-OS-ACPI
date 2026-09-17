@@ -72,6 +72,11 @@ struct acpi_namespace_device {
     char uid[ACPI_NAMESPACE_ID_MAX];
     uint64_t address;
     uint32_t status;
+    uint32_t irq;
+    bool has_i2c;
+    uint16_t i2c_address;
+    uint32_t i2c_speed_hz;
+    char i2c_controller[ACPI_NAMESPACE_ID_MAX];
     bool enabled;
 };
 typedef bool (*acpi_namespace_device_visitor)(
