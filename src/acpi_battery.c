@@ -116,7 +116,6 @@ bool acpi_battery_refresh(struct acpi_battery_live *out) {
         if (have_info_sta_absent(have_sta_ok, sta))
             continue;
 
-        // This battery object reports present — evaluate it.
         return battery_read_live(bat, out);
     }
     return false;
