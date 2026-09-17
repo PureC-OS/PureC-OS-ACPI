@@ -7,8 +7,7 @@ KERNEL_SRC ?= $(abspath $(ACPI_DIR)/../src)
 
 CFLAGS := -std=c11 -Wall -Wextra -O2 -ffreestanding -fno-stack-protector \
 	-fno-pic -m64 -mno-red-zone -mcmodel=kernel -mgeneral-regs-only \
-	-I$(ACPI_DIR)/include -I$(KERNEL_SRC) -I$(ACPI_DIR)/AML/uACPI/include \
-	-DUACPI_BAREBONES_MODE
+	-I$(ACPI_DIR)/include -I$(KERNEL_SRC) -I$(ACPI_DIR)/AML/uACPI/include
 
 BIN_DIR ?= $(ACPI_DIR)/build
 MODULE_DIR := $(BIN_DIR)/modules
@@ -16,7 +15,7 @@ BUILD := $(ACPI_DIR)/build/obj
 
 UACPI_SOURCES := $(wildcard $(ACPI_DIR)/AML/uACPI/source/*.c)
 UACPI_SOURCES := $(UACPI_SOURCES:$(ACPI_DIR)/%=%)
-SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c src/uacpi_glue.c $(UACPI_SOURCES)
+SOURCES := src/acpi.c src/acpi_s5.c src/acpi_power.c src/uacpi_glue.c src/uacpi_heap.c $(UACPI_SOURCES)
 MOD_OBJS := $(SOURCES:%.c=$(BUILD)/%.k.o)
 MOD_ELF := $(MODULE_DIR)/acpi.elf
 MOD_KO := $(MODULE_DIR)/acpi.ko

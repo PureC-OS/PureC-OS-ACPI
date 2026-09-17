@@ -301,7 +301,7 @@ uacpi_status uacpi_kernel_pci_device_open(
     uacpi_pci_address address, uacpi_handle *out_handle) {
     if (!out_handle)
         return UACPI_STATUS_INVALID_ARGUMENT;
-    if (address.bus > 255 || address.device > 31 || address.function > 7)
+    if (address.device > 31 || address.function > 7)
         return UACPI_STATUS_INVALID_ARGUMENT;
     uint32_t id = pci_read_config32((uint8_t)address.bus,
                                     (uint8_t)address.device,
