@@ -387,11 +387,7 @@ uacpi_status uacpi_kernel_pci_write8(
     if (!dev || off > 255)
         return UACPI_STATUS_INVALID_ARGUMENT;
     struct uacpi_pci_handle *h = pci_h(dev);
-    uint8_t a = (uint8_t)(off & ~3u);
-    uint32_t w = pci_read_config32(h->bus, h->dev, h->func, a);
-    uint32_t sh = (uint32_t)(off & 3) * 8;
-    w = (w & ~(0xFFu << sh)) | ((uint32_t)v << sh);
-    pci_write_config32(h->bus, h->dev, h->func, a, w);
+    pci_write_config8(h->bus,h->dev,h->func,(uint8_t)off,v);
     return UACPI_STATUS_OK;
 }
 
@@ -400,11 +396,7 @@ uacpi_status uacpi_kernel_pci_write16(
     if (!dev || off > 254 || (off & 1))
         return UACPI_STATUS_INVALID_ARGUMENT;
     struct uacpi_pci_handle *h = pci_h(dev);
-    uint8_t a = (uint8_t)(off & ~3u);
-    uint32_t w = pci_read_config32(h->bus, h->dev, h->func, a);
-    uint32_t sh = (uint32_t)(off & 3) * 8;
-    w = (w & ~(0xFFFFu << sh)) | ((uint32_t)v << sh);
-    pci_write_config32(h->bus, h->dev, h->func, a, w);
+    pci_write_config16(h->bus,h->dev,h->func,(uint8_t)off,v);
     return UACPI_STATUS_OK;
 }
 
